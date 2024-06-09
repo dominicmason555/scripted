@@ -1,7 +1,5 @@
 declare module "wasm" {
   interface LuaManager {
-    runCallback: function
-    callbackReady: function
     runScheduler: function
     init: function
   }

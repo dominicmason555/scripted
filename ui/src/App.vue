@@ -17,16 +17,6 @@ function getWindow() {
   return ((window as unknown) as Window)
 }
 
-function runCallback() {
-  const lua = getWindow().Module.LuaManager
-  if (lua.callbackReady()) {
-    const before = performance.now()
-    lua.runCallback()
-    const execution_time = performance.now() - before
-    execTime.value = ` - Took ${execution_time} ms `
-  }
-}
-
 function stepScheduler() {
   const lua = getWindow().Module.LuaManager
   const before = performance.now()
@@ -105,7 +95,6 @@ createThread("thread2", blinkLow, "blinkLow")
     <div>
       <button id="runBtn">Run Script</button>
       <button id="clearBtn" @click="clearOutput()">Clear Output</button>
-      <button id="callbackBtn" @click="runCallback()">Run Callback</button>
       <button id="stepBtn" @click="stepScheduler()">Step Scheduler</button>
       <span>Now: {{ timeNow }} </span>
       <span>{{ execTime }}</span>
