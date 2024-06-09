@@ -59,7 +59,6 @@ private:
     static lua_State* L;
     static bool initialised;
     static uint8_t LUA_MEM[LUA_MEM_SIZE];
-    static int callback_ref;
     static std::array<LuaThread, MAX_THREADS> threads;
 
     static int getNextFreeThread()
@@ -78,12 +77,6 @@ private:
 
 public:
     // Functions callable from Lua:
-
-    static int registerCallback(lua_State* L)
-    {
-        callback_ref = luaL_ref(L, LUA_REGISTRYINDEX);
-        return 0;
-    }
 
     static int createThread(lua_State* L)
     {
@@ -157,33 +150,6 @@ public:
 
     static bool isInitialised() { return initialised; }
 
-    static bool callbackReady()
-    {
-        if (initialised)
-        {
-            int type = lua_rawgeti(L, LUA_REGISTRYINDEX, callback_ref);
-            return type == LUA_TFUNCTION;
-        }
-        else
-        {
-            return false;
-        }
-    }
-
-    static void runCallback()
-    {
-        if (initialised)
-        {
-            int type = lua_rawgeti(L, LUA_REGISTRYINDEX, callback_ref);
-            int res = lua_pcall(L, 0, 0, 0);
-            if (res)
-            {
-                std::cout << "Error calling back: " << lua_tostring(L, -1)
-                          << std::endl;
-            }
-        }
-    }
-
     static int runScheduler(uint32_t now)
     {
         int ret = -1;
@@ -247,8 +213,6 @@ public:
         threads = { 0 };
         initialised = true;
         // std::cerr << "Lua initialised" << std::endl;
-        lua_pushcfunction(L, registerCallback);
-        lua_setglobal(L, "registerCallback");
         lua_pushcfunction(L, createThread);
         lua_setglobal(L, "createThread");
         lua_pushcfunction(L, continueAt);
@@ -259,7 +223,6 @@ public:
 lua_State* LuaManager::L = nullptr;
 bool LuaManager::initialised = false;
 uint8_t LuaManager::LUA_MEM[LUA_MEM_SIZE] = { 0 };
-int LuaManager::callback_ref = -1;
 std::array<LuaThread, MAX_THREADS> LuaManager::threads = { 0 };
 
 int addTwoNums(int a, int b) { return a + b; }
@@ -277,8 +240,6 @@ EMSCRIPTEN_BINDINGS(webbed)
     class_<LuaManager>("LuaManager")
         .class_function("init", &LuaManager::init)
         .class_function("isInitialised", &LuaManager::isInitialised)
-        .class_function("runCallback", &LuaManager::runCallback)
-        .class_function("callbackReady", &LuaManager::callbackReady)
         .class_function("doString", &LuaManager::doString)
         .class_function("runScheduler", &LuaManager::runScheduler);
 }
