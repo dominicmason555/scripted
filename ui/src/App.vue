@@ -4,6 +4,7 @@ type Window = import('wasm').Window
 
 const execTime = ref("")
 const timeNow = ref(0)
+const schedulerRunning = ref(false)
 
 function clearOutput() {
   console.log("Clear")
@@ -17,6 +18,22 @@ function getWindow() {
   return ((window as unknown) as Window)
 }
 
+function startScheduler() {
+  schedulerRunning.value = true
+  setTimeout(schedulerTimeout, 10)
+}
+
+function stopScheduler() {
+  schedulerRunning.value = false
+}
+
+function schedulerTimeout() {
+  stepScheduler()
+  if (schedulerRunning.value === true) {
+    setTimeout(schedulerTimeout, 1)
+  }
+}
+
 function stepScheduler() {
   const lua = getWindow().Module.LuaManager
   const before = performance.now()
@@ -25,18 +42,21 @@ function stepScheduler() {
   execTime.value = ` - Took ${execution_time} ms `
   timeNow.value = timeNow.value + 10
   getWindow().Module.print("")
-
 }
+
 </script>
 
 <script lang="ts">
 const Module: any = {
   print: function (t: string) {
-    const text = t + "\n"
-    console.log(text);
+    const text = `${t}\n`
+    console.log(text)
     const output = document.getElementById("scriptOutput")
     if (output) {
       (output as HTMLInputElement).value += text
+      if ((output as HTMLInputElement).value.length > 1000) {
+        (output as HTMLInputElement).value = (output as HTMLInputElement).value.slice(-1000)
+      }
       output.scrollTop = output.scrollHeight
     }
   }
@@ -95,7 +115,11 @@ createThread("thread2", blinkLow, "blinkLow")
     <div>
       <button id="runBtn">Run Script</button>
       <button id="clearBtn" @click="clearOutput()">Clear Output</button>
+      <button id="startBtn" @click="startScheduler()">Start Scheduler</button>
+      <button id="stopBtn" @click="stopScheduler()">Stop Scheduler</button>
       <button id="stepBtn" @click="stepScheduler()">Step Scheduler</button>
+    </div>
+    <div>
       <span>Now: {{ timeNow }} </span>
       <span>{{ execTime }}</span>
     </div>
