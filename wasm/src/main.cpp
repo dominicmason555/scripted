@@ -62,14 +62,100 @@ private:
     static int callback_ref;
     static std::array<LuaThread, MAX_THREADS> threads;
 
+    static int getNextFreeThread()
+    {
+        int res = -1;
+        for (int i = 0; i < MAX_THREADS; i++)
+        {
+            if (threads[i].active == false)
+            {
+                res = i;
+                break;
+            }
+        }
+        return res;
+    }
+
 public:
-    static bool isInitialised() { return initialised; }
+    // Functions callable from Lua:
 
     static int registerCallback(lua_State* L)
     {
         callback_ref = luaL_ref(L, LUA_REGISTRYINDEX);
         return 0;
     }
+
+    static int createThread(lua_State* L)
+    {
+        int res = -1;
+        int threadIdx = getNextFreeThread();
+        if (threadIdx != -1)
+        {
+            int nargs = lua_gettop(L);
+            if (nargs < 2)
+            {
+                lua_pushliteral(
+                    L, "createThread takes 2 args: name and function");
+                lua_error(L);
+            }
+            std::string name = luaL_checkstring(L, 1);
+            luaL_checktype(L, 2, LUA_TFUNCTION);
+            std::string funName = nargs == 3 ? luaL_checkstring(L, 3) : name;
+            lua_insert(L, -2);
+            threads[threadIdx]
+                = { true, name, funName, luaL_ref(L, LUA_REGISTRYINDEX), 0 };
+
+            res = 0;
+        }
+        else
+        {
+            lua_pushfstring(
+                L, "Reached %d threads, which is the maximum", MAX_THREADS);
+            lua_error(L);
+        }
+        return res;
+    }
+
+    static int continueAt(lua_State* L)
+    {
+        int newFunc = 0;
+        std::string newName;
+        int nargs = lua_gettop(L);
+        uint32_t when = luaL_checkinteger(L, 1);
+        if (nargs > 1)
+        {
+            newFunc = luaL_ref(L, LUA_REGISTRYINDEX);
+        }
+        if (nargs > 2)
+        {
+            newName = luaL_checkstring(L, 3);
+            std::cout << "new name" << newName << std::endl;
+        }
+        lua_getglobal(L, "THREAD_IDX");
+        int foundIdx = 0;
+        int threadIdx = lua_tointegerx(L, -1, &foundIdx);
+        if (foundIdx != 0)
+        {
+            if ((threadIdx >= 0) && (threadIdx < MAX_THREADS))
+            {
+                threads[threadIdx].active = true;
+                threads[threadIdx].nextRun = when;
+                if (nargs > 1)
+                {
+                    threads[threadIdx].function = newFunc;
+                }
+                if (nargs > 2)
+                {
+                    threads[threadIdx].functionName = newName;
+                }
+            }
+        }
+        return 0;
+    }
+
+    // Functions callable from JS:
+
+    static bool isInitialised() { return initialised; }
 
     static bool callbackReady()
     {
@@ -98,38 +184,75 @@ public:
         }
     }
 
-    static int doString(std::string code)
+    static int runScheduler(uint32_t now)
     {
+        int ret = -1;
         if (initialised)
         {
-            int res = luaL_dostring(L, code.c_str());
-            if (res)
+            ret = 0;
+            for (int threadIdx = 0; threadIdx < MAX_THREADS; threadIdx++)
+            {
+                if (threads[threadIdx].active
+                    && (threads[threadIdx].nextRun <= now))
+                {
+                    ret++;
+                    // Lua function can re-set this using `continueAt`
+                    threads[threadIdx].active = false;
+                    // Store which thread we're in to a global
+                    lua_pushinteger(L, threadIdx);
+                    lua_setglobal(L, "THREAD_IDX");
+                    int type = lua_rawgeti(
+                        L, LUA_REGISTRYINDEX, threads[threadIdx].function);
+                    if (type == LUA_TFUNCTION)
+                    {
+                        // Call thread function with time
+                        lua_pushinteger(L, now);
+                        int res = lua_pcall(L, 1, 0, 0);
+                        if (res)
+                        {
+                            std::cout << "Error in thread "
+                                      << threads[threadIdx].name << ": "
+                                      << lua_tostring(L, -1) << std::endl;
+                        }
+                    }
+                }
+            }
+        }
+        return ret;
+    }
+
+    static int doString(std::string code)
+    {
+        int ret = -1;
+        if (initialised)
+        {
+            threads = { 0 };
+            ret = luaL_dostring(L, code.c_str());
+            if (ret)
             {
                 std::cout << "Lua Error: " << lua_tostring(L, -1) << std::endl;
             }
-            return res;
         }
-        else
-        {
-            return -1;
-        }
+        return ret;
     }
 
     static void init()
     {
-        if (!initialised)
-        {
-            // std::cerr << "Initialising allocator" << std::endl;
-            ta_init(LUA_MEM, LUA_MEM + LUA_MEM_SIZE - 1, 512, 16, 4);
-            // std::cerr << "Creating Lua state" << std::endl;
-            L = lua_newstate(allocator, nullptr);
-            // std::cerr << "Opening Lua libraries" << std::endl;
-            luaL_openlibs(L);
-            initialised = true;
-            // std::cerr << "Lua initialised" << std::endl;
-            lua_pushcfunction(L, registerCallback);
-            lua_setglobal(L, "registerCallback");
-        }
+        // std::cerr << "Initialising allocator" << std::endl;
+        ta_init(LUA_MEM, LUA_MEM + LUA_MEM_SIZE - 1, 512, 16, 4);
+        // std::cerr << "Creating Lua state" << std::endl;
+        L = lua_newstate(allocator, nullptr);
+        // std::cerr << "Opening Lua libraries" << std::endl;
+        luaL_openlibs(L);
+        threads = { 0 };
+        initialised = true;
+        // std::cerr << "Lua initialised" << std::endl;
+        lua_pushcfunction(L, registerCallback);
+        lua_setglobal(L, "registerCallback");
+        lua_pushcfunction(L, createThread);
+        lua_setglobal(L, "createThread");
+        lua_pushcfunction(L, continueAt);
+        lua_setglobal(L, "continueAt");
     }
 };
 
@@ -137,7 +260,7 @@ lua_State* LuaManager::L = nullptr;
 bool LuaManager::initialised = false;
 uint8_t LuaManager::LUA_MEM[LUA_MEM_SIZE] = { 0 };
 int LuaManager::callback_ref = -1;
-std::array<LuaThread, MAX_THREADS> threads = { 0 };
+std::array<LuaThread, MAX_THREADS> LuaManager::threads = { 0 };
 
 int addTwoNums(int a, int b) { return a + b; }
 
@@ -156,6 +279,6 @@ EMSCRIPTEN_BINDINGS(webbed)
         .class_function("isInitialised", &LuaManager::isInitialised)
         .class_function("runCallback", &LuaManager::runCallback)
         .class_function("callbackReady", &LuaManager::callbackReady)
-        .class_function("doString", &LuaManager::doString);
-    /* .class_function("runScheduler", &LuaManager::runScheduler); */
+        .class_function("doString", &LuaManager::doString)
+        .class_function("runScheduler", &LuaManager::runScheduler);
 }

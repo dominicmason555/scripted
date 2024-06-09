@@ -1,10 +1,9 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-type Module = import('wasm').Module
-type LuaManager = import('wasm').LuaManager
 type Window = import('wasm').Window
 
 const execTime = ref("")
+const timeNow = ref(0)
 
 function clearOutput() {
   console.log("Clear")
@@ -14,18 +13,29 @@ function clearOutput() {
   }
 }
 
-function getLua() {
-  return (((window as unknown) as Window).Module as Module).LuaManager as LuaManager
+function getWindow() {
+  return ((window as unknown) as Window)
 }
 
 function runCallback() {
-  const lua = getLua()
+  const lua = getWindow().Module.LuaManager
   if (lua.callbackReady()) {
     const before = performance.now()
     lua.runCallback()
     const execution_time = performance.now() - before
-    execTime.value = `Took ${execution_time} ms`
+    execTime.value = ` - Took ${execution_time} ms `
   }
+}
+
+function stepScheduler() {
+  const lua = getWindow().Module.LuaManager
+  const before = performance.now()
+  lua.runScheduler(timeNow.value)
+  const execution_time = performance.now() - before
+  execTime.value = ` - Took ${execution_time} ms `
+  timeNow.value = timeNow.value + 10
+  getWindow().Module.print("")
+
 }
 </script>
 
@@ -66,18 +76,19 @@ export default {
 
 i = 0
 
-function blinkHigh()
+function blinkHigh(now)
     i = i + 1
-    print("Blink high, counter = " .. i)
-    registerCallback(blinkLow)
+    print("Thread " .. THREAD_IDX .. " blink high, counter = " .. i)
+    continueAt(now + 10, blinkLow)
 end
 
-function blinkLow()
-    print("Blink low")
-    registerCallback(blinkHigh)
+function blinkLow(now)
+    print("Thread " .. THREAD_IDX .. " blink low")
+    continueAt(now + 10, blinkHigh)
 end
 
-registerCallback(blinkHigh)
+createThread("thread1", blinkHigh, "blinkHigh")
+createThread("thread2", blinkLow, "blinkLow")
 `
     }
   },
@@ -95,6 +106,8 @@ registerCallback(blinkHigh)
       <button id="runBtn">Run Script</button>
       <button id="clearBtn" @click="clearOutput()">Clear Output</button>
       <button id="callbackBtn" @click="runCallback()">Run Callback</button>
+      <button id="stepBtn" @click="stepScheduler()">Step Scheduler</button>
+      <span>Now: {{ timeNow }} </span>
       <span>{{ execTime }}</span>
     </div>
     <textarea id="scriptOutput" rows="24" cols="80"></textarea>

@@ -1,11 +1,14 @@
 declare module "wasm" {
   interface LuaManager {
-    runCallback: function;
-    callbackReady: function;
+    runCallback: function
+    callbackReady: function
+    runScheduler: function
+    init: function
   }
 
   interface Module {
-    LuaManager: LuaManager;
+    LuaManager: LuaManager
+    print: function
   }
 
   interface Window {
